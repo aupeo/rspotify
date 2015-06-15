@@ -23,10 +23,14 @@ module RSpotify
     #           playlist.name #=> "Movie Soundtrack Masterpieces"
     def authenticate(client_id, client_secret)
       @client_id, @client_secret = client_id, client_secret
+      refresh_token
+      true
+    end
+
+    def refresh_token
       request_body = { grant_type: 'client_credentials' }
       response = RestClient.post(TOKEN_URI, request_body, auth_header)
       @client_token = JSON.parse(response)['access_token']
-      true
     end
 
     VERBS.each do |verb|
@@ -38,7 +42,21 @@ module RSpotify
       define_method "auth_#{verb}" do |path, *params|
         auth_header = { 'Authorization' => "Bearer #{@client_token}" }
         params << auth_header
-        send(verb, path, *params)
+
+        retried = false
+        begin
+          response = send(verb, path, *params)
+        rescue RestClient::Unauthorized => e
+          # TODO log
+          Rails.logger.debug("RSPOTIFY RETRY RestClient::Unauthorized #{e.response} #{e.inspect}") if defined?(Rails)
+          #raise e if e.response !~ /access token expired/
+          if !retried
+            refresh_token
+            retried = true
+            retry
+          end
+        end  
+
       end
     end
 
